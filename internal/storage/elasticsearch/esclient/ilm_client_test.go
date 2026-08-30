@@ -171,7 +171,7 @@ func TestLifecycleExistsRequestSnapshot(t *testing.T) {
 	snapshottest.AssertByVersion(t, "testdata/ilm_exists", content)
 }
 
-func TestTestsOnlyPutPolicy(t *testing.T) {
+func TestCreatePolicy(t *testing.T) {
 	tests := []struct {
 		name     string
 		version  es.BackendVersion
@@ -191,7 +191,7 @@ func TestTestsOnlyPutPolicy(t *testing.T) {
 			}))
 			defer srv.Close()
 			c := ILMClient{Client: makeClient(t, srv.URL, "", "", tt.version), Logger: zap.NewNop()}
-			require.NoError(t, c.TestsOnlyPutPolicy(context.Background(), "p", `{"policy":{}}`))
+			require.NoError(t, c.CreatePolicy(context.Background(), "p", `{"policy":{}}`))
 			assert.Equal(t, http.MethodPut, gotMethod)
 			assert.Equal(t, tt.wantPath, gotPath)
 		})
@@ -202,7 +202,7 @@ func TestTestsOnlyPutPolicy(t *testing.T) {
 		}))
 		defer srv.Close()
 		c := ILMClient{Client: makeClient(t, srv.URL, "", ""), Logger: zap.NewNop()}
-		require.ErrorContains(t, c.TestsOnlyPutPolicy(context.Background(), "p", "{}"),
+		require.ErrorContains(t, c.CreatePolicy(context.Background(), "p", "{}"),
 			"failed to create lifecycle policy")
 	})
 }
@@ -242,11 +242,34 @@ func TestTestsOnlyDeletePolicyError(t *testing.T) {
 		"failed to delete lifecycle policy")
 }
 
-func TestTestsOnlyPutPolicyTransportError(t *testing.T) {
+func TestCreatePolicyTransportError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	url := srv.URL
 	srv.Close() // construct against a now-dead server so Perform fails
 	c := ILMClient{Client: makeClient(t, url, "", ""), Logger: zap.NewNop()}
-	require.ErrorContains(t, c.TestsOnlyPutPolicy(context.Background(), "p", "{}"),
+	require.ErrorContains(t, c.CreatePolicy(context.Background(), "p", "{}"),
 		"failed to create lifecycle policy")
+}
+
+func TestDefaultPolicy(t *testing.T) {
+	tests := []struct {
+		name    string
+		version es.BackendVersion
+	}{
+		{"ES uses ILM", es.ElasticV8},
+		{"OS uses ISM", es.OpenSearch2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := ILMClient{Client: makeClient(t, "http://localhost", "", "", tt.version), Logger: zap.NewNop()}
+			got, err := c.DefaultPolicy()
+			require.NoError(t, err)
+			assert.Contains(t, string(got), "rollover")
+			if tt.version.IsOpenSearch() {
+				assert.Contains(t, string(got), "ism_template")
+			} else {
+				assert.Contains(t, string(got), "phases")
+			}
+		})
+	}
 }

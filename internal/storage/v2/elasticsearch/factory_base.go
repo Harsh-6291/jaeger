@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"go.opentelemetry.io/collector/extension/extensionauth"
 	"go.opentelemetry.io/otel/trace"
@@ -245,6 +246,13 @@ func (f *FactoryBase) indicesClient() *esclient.IndicesClient {
 	}
 }
 
+func (f *FactoryBase) ilmClient() *esclient.ILMClient {
+	return &esclient.ILMClient{
+		Client: f.esClient,
+		Logger: f.logger,
+	}
+}
+
 // Close closes the resources held by the factory. The bulk indexer is closed
 // here (flushing buffered writes and stopping its workers) even when no writer
 // was created, e.g. a query-only service.
@@ -315,6 +323,34 @@ func (f *FactoryBase) createTemplates(ctx context.Context) error {
 		return nil
 	}
 	ic := f.indicesClient()
+
+	spanRC := f.config.ResolvedSpanRotation()
+	if spanRC.DataStream.HasValue() {
+		ds := spanRC.DataStream.Get()
+		policyName := ds.PolicyName
+		if policyName == "" {
+			policyName = "jaeger-spans-policy" // Default policy name if none provided
+		}
+
+		var policyBytes []byte
+		var err error
+		if ds.PolicyFile != "" {
+			policyBytes, err = os.ReadFile(ds.PolicyFile)
+			if err != nil {
+				return fmt.Errorf("failed to read policy file %q: %w", ds.PolicyFile, err)
+			}
+		} else {
+			policyBytes, err = f.ilmClient().DefaultPolicy()
+			if err != nil {
+				return fmt.Errorf("failed to load default lifecycle policy: %w", err)
+			}
+		}
+
+		if err := f.ilmClient().CreatePolicy(ctx, policyName, string(policyBytes)); err != nil {
+			return fmt.Errorf("failed to create lifecycle policy %q: %w", policyName, err)
+		}
+	}
+
 	jaegerSpanIdx := f.config.Indices.IndexPrefix.Apply(config.SpanIndexName)
 	jaegerServiceIdx := f.config.Indices.IndexPrefix.Apply(config.ServiceIndexName)
 	if err := ic.CreateTemplate(ctx, jaegerSpanIdx, esclient.SpanMapping); err != nil {

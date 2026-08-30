@@ -160,11 +160,5 @@ func (r *RotationConfig) validate(indexType string) error {
 			indexType, count,
 		)
 	}
-	if r.DataStream.HasValue() {
-		return fmt.Errorf(
-			"indices.%s.rotation: data_stream is not yet implemented",
-			indexType,
-		)
-	}
 	return nil
 }

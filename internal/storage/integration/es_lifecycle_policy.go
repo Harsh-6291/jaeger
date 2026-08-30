@@ -51,5 +51,5 @@ func PutRolloverLifecyclePolicy(t *testing.T, ilm *esclient.ILMClient, name stri
 	if ilm.TestsOnlyBackendVersion().IsOpenSearch() {
 		body = rolloverISMPolicyBody
 	}
-	require.NoError(t, ilm.TestsOnlyPutPolicy(context.Background(), name, body))
+	require.NoError(t, ilm.CreatePolicy(context.Background(), name, body))
 }

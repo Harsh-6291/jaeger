@@ -5,6 +5,7 @@ package esclient
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +23,9 @@ const (
 )
 
 var _ IndexManagementLifecycleAPI = (*ILMClient)(nil)
+
+//go:embed lifecycle_policies/*.json
+var lifecyclePoliciesFS embed.FS
 
 // ILMClient is a client used to manipulate Index lifecycle management policies.
 // It supports both Elasticsearch ILM and OpenSearch ISM APIs, selecting the
@@ -43,15 +47,14 @@ func (i ILMClient) policyEndpoint(name string) string {
 	return "_ilm/policy/" + name
 }
 
-// TestsOnlyPutPolicy installs a lifecycle policy (ILM on Elasticsearch, ISM on
+// CreatePolicy installs a lifecycle policy (ILM on Elasticsearch, ISM on
 // OpenSearch). The body's schema is backend-specific, so the caller supplies it;
-// the endpoint is chosen here. Integration-test-only — Jaeger never creates
-// lifecycle policies (es-rollover requires an operator-created policy to exist).
+// the endpoint is chosen here.
 //
 // It goes through Perform rather than request() because a successful policy PUT
 // is 200 on Elasticsearch but 201 on OpenSearch (and re-creating an ISM policy
 // returns 409); request() accepts only 200, so it would reject the 201 and 409.
-func (i ILMClient) TestsOnlyPutPolicy(ctx context.Context, name, body string) error {
+func (i ILMClient) CreatePolicy(ctx context.Context, name, body string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, "/"+i.policyEndpoint(name), strings.NewReader(body))
 	if err != nil {
 		return err
@@ -71,8 +74,16 @@ func (i ILMClient) TestsOnlyPutPolicy(ctx context.Context, name, body string) er
 	}
 }
 
+// DefaultPolicy returns the default JSON policy body for the client's backend (ILM or ISM).
+func (i ILMClient) DefaultPolicy() ([]byte, error) {
+	if i.version.IsOpenSearch() {
+		return lifecyclePoliciesFS.ReadFile("lifecycle_policies/ism-default.json")
+	}
+	return lifecyclePoliciesFS.ReadFile("lifecycle_policies/ilm-default.json")
+}
+
 // TestsOnlyDeletePolicy removes a lifecycle policy, tolerating a missing one.
-// Integration-test-only, same rationale as TestsOnlyPutPolicy.
+// Integration-test-only, same rationale as CreatePolicy.
 func (i ILMClient) TestsOnlyDeletePolicy(ctx context.Context, name string) error {
 	_, err := i.request(ctx, elasticRequest{
 		endpoint: i.policyEndpoint(name),

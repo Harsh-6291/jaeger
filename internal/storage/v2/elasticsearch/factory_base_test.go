@@ -323,6 +323,49 @@ func TestCreateTemplates(t *testing.T) {
 	}
 }
 
+func TestCreateTemplatesDataStream(t *testing.T) {
+	var puts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			puts = append(puts, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("{}"))
+			return
+		}
+		w.Write(mockEsServerResponse)
+	}))
+	defer server.Close()
+
+	esClient, err := esclient.NewClient(
+		context.Background(),
+		&escfg.Configuration{Servers: []string{server.URL}, Version: uint(es.ElasticV7)},
+		zap.NewNop(),
+		extensionauth.NewDefaultClient(),
+	)
+	require.NoError(t, err)
+
+	cfg := &escfg.Configuration{
+		CreateIndexTemplates: true,
+	}
+	// Setup data stream rotation
+	cfg.Indices.Spans.Rotation.DataStream.Init(escfg.DataStreamRotation{})
+
+	f := &FactoryBase{
+		esClient: esClient,
+		config:   cfg,
+		logger:   zap.NewNop(),
+	}
+
+	err = f.createTemplates(context.Background())
+	require.NoError(t, err)
+
+	// Expect 3 PUTs: policy, span template, service template
+	require.Len(t, puts, 3)
+	assert.Contains(t, puts, "/_ilm/policy/jaeger-spans-policy")
+	assert.Contains(t, puts, "/_template/jaeger-span")
+	assert.Contains(t, puts, "/_template/jaeger-service")
+}
+
 // TestCreateTemplatesServiceError exercises the service-template error branch:
 // the span PUT succeeds and only the service PUT fails.
 func TestCreateTemplatesServiceError(t *testing.T) {
